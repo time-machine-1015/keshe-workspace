@@ -1380,6 +1380,9 @@ function formatDate(iso) {
 const BASE_SCORE = 85; // 基础分
 const EXCLUDED_MEMBERS = ["孙诗琪", "范佳宁", "陈健豪", "孙催办"]; // 不参与考核（负责人本人 / 测试账号）
 const SUPER_ADMIN_PHONE = "15086653768"; // 唯一能清空记录的人
+// 按姓名授予「负责人/管理员」权限的名单（不含超级管理员清空权限）
+// 龙国杨、付依林、朱涛：登录并绑定成员身份后即获得负责人权限；收回时删除对应姓名即可
+const ADMIN_BY_NAME = ["龙国杨", "付依林", "朱涛"];
 
 // 子标签切换（加减分页）
 document.querySelectorAll('#view-scores .sub-tab').forEach((tab) => {
@@ -1426,6 +1429,20 @@ async function checkScorePermission() {
   const { data } = await cloud.database.from("admins").select("phone");
   const admins = data || [];
   isAdminUser = admins.some((a) => normalizePhone(a.phone) === phone && phone !== "");
+  // 按姓名授权：登录用户绑定的成员姓名在 ADMIN_BY_NAME 名单中，则同样视为负责人
+  if (!isAdminUser) {
+    try {
+      const uid = currentUserInfo?.uid || "";
+      if (uid) {
+        const { data: mine } = await cloud.database.from("member_meta").select("name").eq("uid", uid).maybeSingle();
+        if (mine && ADMIN_BY_NAME.includes(mine.name)) {
+          isAdminUser = true;
+        }
+      }
+    } catch (e) {
+      // 忽略按姓名授权的查询失败
+    }
+  }
   renderScorePermission();
 }
 
