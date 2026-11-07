@@ -864,32 +864,40 @@ function renderTemplateReview(reviewEl, pendingGroups, pendingSamples, byGroup, 
     const sample = (byGroup[g.id] || [])[0];
     const actions = isAdminUser
       ? `<div class="template-review-actions">
-          <button class="template-review-pass" type="button" data-review="approve-group" data-id="${g.id}" data-member="${escapeHtml(g.owner_name || "")}" data-title="${escapeHtml(g.title || "")}" data-category="${escapeHtml(realCategory(g.category))}">通过并加 ${SCORE_NEW_GROUP} 分</button>
+          <button class="template-review-pass" type="button" data-review="approve-group" data-id="${g.id}" data-member="${escapeHtml(g.owner_name || "")}" data-title="${escapeHtml(g.title || "")}" data-category="${escapeHtml(realCategory(g.category))}">通过</button>
           <button class="template-review-reject" type="button" data-review="reject-group" data-id="${g.id}" data-title="${escapeHtml(g.title || "")}">驳回</button>
         </div>`
       : `<span class="template-review-wait">审核中</span>`;
     return `<div class="card template-review-card">
-      <span class="template-cat">新建大类 · ${cat} · 通过后 +${SCORE_NEW_GROUP}</span>
-      <h3>${escapeHtml(g.title)}</h3>
-      <p class="template-review-meta">申请人：${escapeHtml(g.owner_name || "未知")}</p>
-      <pre>${escapeHtml(sample?.content || "")}</pre>
-      ${actions}
+      <div class="template-review-row">
+        <div class="template-review-info">
+          <span class="template-cat">新建大类 · ${cat} · 通过 +${SCORE_NEW_GROUP}</span>
+          <strong class="template-review-title">${escapeHtml(g.title)}</strong>
+          <span class="template-review-meta">申请人：${escapeHtml(g.owner_name || "未知")}</span>
+        </div>
+        ${actions}
+      </div>
+      ${sample?.content ? `<details class="template-review-detail"><summary>查看范文内容</summary><pre>${escapeHtml(sample.content)}</pre></details>` : ""}
     </div>`;
   }).join("");
   const sampleHtml = visibleSamples.map((t) => {
     const g = liveGroups.find((x) => String(x.id) === String(t.group_id));
     const actions = isAdminUser
       ? `<div class="template-review-actions">
-          <button class="template-review-pass" type="button" data-review="approve-sample" data-id="${t.id}" data-member="${escapeHtml(t.owner_name || "")}" data-title="${escapeHtml(g?.title || "")}">通过并加 ${SCORE_NEW_SAMPLE} 分</button>
+          <button class="template-review-pass" type="button" data-review="approve-sample" data-id="${t.id}" data-member="${escapeHtml(t.owner_name || "")}" data-title="${escapeHtml(g?.title || "")}">通过</button>
           <button class="template-review-reject" type="button" data-review="reject-sample" data-id="${t.id}">驳回</button>
         </div>`
       : `<span class="template-review-wait">审核中</span>`;
     return `<div class="card template-review-card">
-      <span class="template-cat">已有大类范文 · 通过后 +${SCORE_NEW_SAMPLE}</span>
-      <h3>${escapeHtml(g?.title || "大类")}</h3>
-      <p class="template-review-meta">申请人：${escapeHtml(t.owner_name || "未知")}</p>
-      <pre>${escapeHtml(t.content || "")}</pre>
-      ${actions}
+      <div class="template-review-row">
+        <div class="template-review-info">
+          <span class="template-cat">已有大类范文 · 通过 +${SCORE_NEW_SAMPLE}</span>
+          <strong class="template-review-title">${escapeHtml(g?.title || "大类")}</strong>
+          <span class="template-review-meta">申请人：${escapeHtml(t.owner_name || "未知")}</span>
+        </div>
+        ${actions}
+      </div>
+      ${t.content ? `<details class="template-review-detail"><summary>查看范文内容</summary><pre>${escapeHtml(t.content)}</pre></details>` : ""}
     </div>`;
   }).join("");
   reviewEl.innerHTML = groupHtml + sampleHtml;
