@@ -864,32 +864,40 @@ function renderTemplateReview(reviewEl, pendingGroups, pendingSamples, byGroup, 
     const sample = (byGroup[g.id] || [])[0];
     const actions = isAdminUser
       ? `<div class="template-review-actions">
-          <button class="template-review-pass" type="button" data-review="approve-group" data-id="${g.id}" data-member="${escapeHtml(g.owner_name || "")}" data-title="${escapeHtml(g.title || "")}" data-category="${escapeHtml(realCategory(g.category))}">通过并加 ${SCORE_NEW_GROUP} 分</button>
+          <button class="template-review-pass" type="button" data-review="approve-group" data-id="${g.id}" data-member="${escapeHtml(g.owner_name || "")}" data-title="${escapeHtml(g.title || "")}" data-category="${escapeHtml(realCategory(g.category))}">通过</button>
           <button class="template-review-reject" type="button" data-review="reject-group" data-id="${g.id}" data-title="${escapeHtml(g.title || "")}">驳回</button>
         </div>`
       : `<span class="template-review-wait">审核中</span>`;
     return `<div class="card template-review-card">
-      <span class="template-cat">新建大类 · ${cat} · 通过后 +${SCORE_NEW_GROUP}</span>
-      <h3>${escapeHtml(g.title)}</h3>
-      <p class="template-review-meta">申请人：${escapeHtml(g.owner_name || "未知")}</p>
-      <pre>${escapeHtml(sample?.content || "")}</pre>
-      ${actions}
+      <div class="template-review-row">
+        <div class="template-review-info">
+          <span class="template-cat">新建大类 · ${cat} · 通过 +${SCORE_NEW_GROUP}</span>
+          <strong class="template-review-title">${escapeHtml(g.title)}</strong>
+          <span class="template-review-meta">申请人：${escapeHtml(g.owner_name || "未知")}</span>
+        </div>
+        ${actions}
+      </div>
+      ${sample?.content ? `<details class="template-review-detail"><summary>查看范文内容</summary><pre>${escapeHtml(sample.content)}</pre></details>` : ""}
     </div>`;
   }).join("");
   const sampleHtml = visibleSamples.map((t) => {
     const g = liveGroups.find((x) => String(x.id) === String(t.group_id));
     const actions = isAdminUser
       ? `<div class="template-review-actions">
-          <button class="template-review-pass" type="button" data-review="approve-sample" data-id="${t.id}" data-member="${escapeHtml(t.owner_name || "")}" data-title="${escapeHtml(g?.title || "")}">通过并加 ${SCORE_NEW_SAMPLE} 分</button>
+          <button class="template-review-pass" type="button" data-review="approve-sample" data-id="${t.id}" data-member="${escapeHtml(t.owner_name || "")}" data-title="${escapeHtml(g?.title || "")}">通过</button>
           <button class="template-review-reject" type="button" data-review="reject-sample" data-id="${t.id}">驳回</button>
         </div>`
       : `<span class="template-review-wait">审核中</span>`;
     return `<div class="card template-review-card">
-      <span class="template-cat">已有大类范文 · 通过后 +${SCORE_NEW_SAMPLE}</span>
-      <h3>${escapeHtml(g?.title || "大类")}</h3>
-      <p class="template-review-meta">申请人：${escapeHtml(t.owner_name || "未知")}</p>
-      <pre>${escapeHtml(t.content || "")}</pre>
-      ${actions}
+      <div class="template-review-row">
+        <div class="template-review-info">
+          <span class="template-cat">已有大类范文 · 通过 +${SCORE_NEW_SAMPLE}</span>
+          <strong class="template-review-title">${escapeHtml(g?.title || "大类")}</strong>
+          <span class="template-review-meta">申请人：${escapeHtml(t.owner_name || "未知")}</span>
+        </div>
+        ${actions}
+      </div>
+      ${t.content ? `<details class="template-review-detail"><summary>查看范文内容</summary><pre>${escapeHtml(t.content)}</pre></details>` : ""}
     </div>`;
   }).join("");
   reviewEl.innerHTML = groupHtml + sampleHtml;
@@ -1380,6 +1388,9 @@ function formatDate(iso) {
 const BASE_SCORE = 85; // 基础分
 const EXCLUDED_MEMBERS = ["孙诗琪", "范佳宁", "陈健豪", "孙催办"]; // 不参与考核（负责人本人 / 测试账号）
 const SUPER_ADMIN_PHONE = "15086653768"; // 唯一能清空记录的人
+// 按姓名授予「负责人/管理员」权限的名单（不含超级管理员清空权限）
+// 龙国阳、付依林、朱涛：登录并绑定成员身份后即获得负责人权限；收回时删除对应姓名即可
+const ADMIN_BY_NAME = ["龙国阳", "付依林", "朱涛"];
 
 // 子标签切换（加减分页）
 document.querySelectorAll('#view-scores .sub-tab').forEach((tab) => {
@@ -1423,9 +1434,30 @@ async function checkScorePermission() {
   phone = normalizePhone(phone);
   currentUserPhone = phone;
   // 用规范化后的手机号匹配，同时兼容表里可能存的带/不带 +86 两种格式
-  const { data } = await cloud.database.from("admins").select("phone");
+  const { data } = await cloud.database.from("admins").select("phone, uid");
   const admins = data || [];
   isAdminUser = admins.some((a) => normalizePhone(a.phone) === phone && phone !== "");
+  // 按 uid 匹配：登录用户的 uid 在 admins 表（含按姓名授权的记录），则视为负责人
+  if (!isAdminUser) {
+    const uid = currentUserInfo?.uid || "";
+    if (uid && admins.some((a) => a.uid === uid)) {
+      isAdminUser = true;
+    }
+  }
+  // 按姓名授权：登录用户绑定的成员姓名在 ADMIN_BY_NAME 名单中，则同样视为负责人
+  if (!isAdminUser) {
+    try {
+      const uid = currentUserInfo?.uid || "";
+      if (uid) {
+        const { data: mine } = await cloud.database.from("member_meta").select("name").eq("uid", uid).maybeSingle();
+        if (mine && ADMIN_BY_NAME.includes(mine.name)) {
+          isAdminUser = true;
+        }
+      }
+    } catch (e) {
+      // 忽略按姓名授权的查询失败
+    }
+  }
   renderScorePermission();
 }
 
@@ -1577,9 +1609,13 @@ async function loadAdminList() {
       const delBtn = isAdminUser
         ? `<button data-phone="${escapeHtml(a.phone)}">取消负责人</button>`
         : "";
+      // 按姓名授权的记录 phone 为占位值（admin-by-name-*），界面显示姓名而非占位手机号
+      const phoneDisplay = String(a.phone || "").startsWith("admin-by-name-")
+        ? (a.name ? "按姓名授权" : "按姓名授权")
+        : a.phone;
       return `
       <div class="admin-item">
-        <span class="admin-item-phone">${escapeHtml(a.phone)}</span>
+        <span class="admin-item-phone">${escapeHtml(phoneDisplay)}</span>
         <span class="admin-item-name">${escapeHtml(a.name || "")}</span>
         ${delBtn}
       </div>`;
@@ -1987,9 +2023,16 @@ async function checkReminderPermission() {
     }
   }
   phone = normalizePhone(phone);
-  const { data } = await cloud.database.from("admins").select("phone");
+  const { data } = await cloud.database.from("admins").select("phone, uid");
   const admins = data || [];
   isActivityAdmin = admins.some((a) => normalizePhone(a.phone) === phone && phone !== "");
+  // 按 uid 匹配：登录用户的 uid 在 admins 表（含按姓名授权的记录），则视为管理员
+  if (!isActivityAdmin) {
+    const uid = currentUserInfo?.uid || "";
+    if (uid && admins.some((a) => a.uid === uid)) {
+      isActivityAdmin = true;
+    }
+  }
   if (btnAdd) btnAdd.hidden = false; // 始终显示，非管理员点击时弹权限提示
   if (hint) hint.textContent = isActivityAdmin ? "（你是管理员，可增删活动）" : "（只读，仅管理员可增删活动）";
   renderActivityAdminControls();
