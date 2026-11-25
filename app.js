@@ -152,6 +152,31 @@ function showAuthError(msg) {
   document.getElementById("auth-error").textContent = msg || "";
 }
 
+// 把验证码/登录的云服务错误映射成通俗中文提示
+function friendlyAuthError(err) {
+  const code = String(err?.code || "").toLowerCase();
+  const msg = String(err?.message || "");
+  const status = err?.status || 0;
+  // 短信频控：每分钟 1 条
+  if (status === 429 || code.includes("resource_exhausted") || code.includes("exhausted") || /per minute|minute/i.test(msg)) {
+    return "验证码发送太频繁，请等待 1 分钟后再试。";
+  }
+  // 单号每日短信上限
+  if (code.includes("failed_precondition") || /daily|day|exceeds the upper limit/i.test(msg)) {
+    return "该手机号今日验证码次数已用尽，请明天再试，或换一个手机号。";
+  }
+  // 网关超时/后端不可用
+  if (status === 502 || err?.kind === "backend-unavailable" || /bad gateway|timeout|timed out/i.test(msg)) {
+    return "短信服务暂时繁忙，请稍后重试。";
+  }
+  // 网络失败
+  if (err?.kind === "network" || status === 0) {
+    return "网络异常，请检查网络后重试。";
+  }
+  // 其他错误：给出可读的原文
+  return msg || "验证码发送失败，请稍后重试。";
+}
+
 // 获取验证码
 document.getElementById("auth-send").addEventListener("click", async () => {
   if (!cloud) { showAuthError("服务未连接，请刷新重试"); return; }
@@ -170,7 +195,7 @@ document.getElementById("auth-send").addEventListener("click", async () => {
 
   const sent = await cloud.auth.sendOtp(mode === "phone" ? { phone: val } : { email: val });
   if (sent.error) {
-    showAuthError(sent.error.message || "验证码发送失败");
+    showAuthError(friendlyAuthError(sent.error));
     sendBtn.disabled = false;
     return;
   }
@@ -219,7 +244,13 @@ document.getElementById("auth-submit").addEventListener("click", async () => {
     token: code,
   });
   if (completed.error) {
-    showAuthError(completed.error.message || "验证失败");
+    const msg = String(completed.error.message || "");
+    // 验证码错误/过期等常见场景给出中文引导
+    if (/code|invalid|expired|验证码|mismatch/i.test(msg)) {
+      showAuthError("验证码错误或已过期，请重新获取。");
+    } else {
+      showAuthError(friendlyAuthError(completed.error));
+    }
     return;
   }
   pendingOtp = null;
@@ -1381,8 +1412,8 @@ const BASE_SCORE = 85; // 基础分
 const EXCLUDED_MEMBERS = ["孙诗琪", "范佳宁", "陈健豪", "孙催办"]; // 不参与考核（负责人本人 / 测试账号）
 const SUPER_ADMIN_PHONE = "15086653768"; // 唯一能清空记录的人
 // 按姓名授予「负责人/管理员」权限的名单（不含超级管理员清空权限）
-// 龙国杨、付依林、朱涛：登录并绑定成员身份后即获得负责人权限；收回时删除对应姓名即可
-const ADMIN_BY_NAME = ["龙国杨", "付依林", "朱涛"];
+// 龙国阳、付依林、朱涛：登录并绑定成员身份后即获得负责人权限；收回时删除对应姓名即可
+const ADMIN_BY_NAME = ["龙国阳", "付依林", "朱涛"];
 
 // 子标签切换（加减分页）
 document.querySelectorAll('#view-scores .sub-tab').forEach((tab) => {
@@ -1426,9 +1457,16 @@ async function checkScorePermission() {
   phone = normalizePhone(phone);
   currentUserPhone = phone;
   // 用规范化后的手机号匹配，同时兼容表里可能存的带/不带 +86 两种格式
-  const { data } = await cloud.database.from("admins").select("phone");
+  const { data } = await cloud.database.from("admins").select("phone, uid");
   const admins = data || [];
   isAdminUser = admins.some((a) => normalizePhone(a.phone) === phone && phone !== "");
+  // 按 uid 匹配：登录用户的 uid 在 admins 表（含按姓名授权的记录），则视为负责人
+  if (!isAdminUser) {
+    const uid = currentUserInfo?.uid || "";
+    if (uid && admins.some((a) => a.uid === uid)) {
+      isAdminUser = true;
+    }
+  }
   // 按姓名授权：登录用户绑定的成员姓名在 ADMIN_BY_NAME 名单中，则同样视为负责人
   if (!isAdminUser) {
     try {
@@ -1594,9 +1632,13 @@ async function loadAdminList() {
       const delBtn = isAdminUser
         ? `<button data-phone="${escapeHtml(a.phone)}">取消负责人</button>`
         : "";
+      // 按姓名授权的记录 phone 为占位值（admin-by-name-*），界面显示姓名而非占位手机号
+      const phoneDisplay = String(a.phone || "").startsWith("admin-by-name-")
+        ? (a.name ? "按姓名授权" : "按姓名授权")
+        : a.phone;
       return `
       <div class="admin-item">
-        <span class="admin-item-phone">${escapeHtml(a.phone)}</span>
+        <span class="admin-item-phone">${escapeHtml(phoneDisplay)}</span>
         <span class="admin-item-name">${escapeHtml(a.name || "")}</span>
         ${delBtn}
       </div>`;
@@ -2004,9 +2046,16 @@ async function checkReminderPermission() {
     }
   }
   phone = normalizePhone(phone);
-  const { data } = await cloud.database.from("admins").select("phone");
+  const { data } = await cloud.database.from("admins").select("phone, uid");
   const admins = data || [];
   isActivityAdmin = admins.some((a) => normalizePhone(a.phone) === phone && phone !== "");
+  // 按 uid 匹配：登录用户的 uid 在 admins 表（含按姓名授权的记录），则视为管理员
+  if (!isActivityAdmin) {
+    const uid = currentUserInfo?.uid || "";
+    if (uid && admins.some((a) => a.uid === uid)) {
+      isActivityAdmin = true;
+    }
+  }
   if (btnAdd) btnAdd.hidden = false; // 始终显示，非管理员点击时弹权限提示
   if (hint) hint.textContent = isActivityAdmin ? "（你是管理员，可增删活动）" : "（只读，仅管理员可增删活动）";
   renderActivityAdminControls();
